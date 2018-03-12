@@ -12,6 +12,10 @@ def checkForPortScans(packet):
         F = packet['TCP'].flags
         if (F == 0): 
             print "ALERT NUL SCAN"
+        elif (F == 1):
+            print "ALERT FIN SCAN"
+        elif (F == (0x01 + 0x08 + 0x20)):
+            print "ALERT XMAS SCAN"
     except:
         pass
 
