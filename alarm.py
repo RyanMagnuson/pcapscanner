@@ -3,24 +3,64 @@
 from scapy.all import *
 import pcapy
 import argparse
+import base64
 
+num = 1
+user = ""
 
+def alert(incident, sourceIP, protocol, loot):
+    global num
+    print "ALERT #" +str( num) + ": " + incident + " from " + sourceIP + protocol + loot
+    num = num + 1
 
 def checkForPortScans(packet):
 
     try:
         F = packet['TCP'].flags
-        if (F == 0): 
-            print "ALERT NUL SCAN"
+        if (F == 0):
+            alert('NUL scan', packet['IP'].src, "(TCP) ", "")
         elif (F == 1):
-            print "ALERT FIN SCAN"
+            alert('FIN scan', packet['IP'].src, "(TCP) ", "")
         elif (F == (0x01 + 0x08 + 0x20)):
-            print "ALERT XMAS SCAN"
+            alert('XMAS scan', packet['IP'].src, "(TCP) ", "")
     except:
         pass
 
+def checkForPasswords(packet):
+    global user
+    if packet.haslayer('TCP') and packet.haslayer('Raw'):
+        if packet['TCP'].dport == 21 or packet['TCP'].sport == 21:
+            data = packet['Raw'].load
+            if 'USER' in data:
+                user = data.split('USER ')[1]
+            if 'PASS' in data:
+                alert('USER/PASS sent in clear', packet['IP'].src, '(23) ', ('(' + user.rstrip() + '/' + data.split('PASS ')[1].rstrip() + ')') )
+        if (packet['TCP'].dport == 143 or packet['TCP'].sport == 143):
+            data = str(packet['TCP'].payload)
+            if 'LOGIN ' in data:
+                user = data.split()
+                data = user[2] + '/' + user[3].rstrip().strip('\"') 
+                alert("USER/PASS sent in clear", packet['IP'].src, '(143) ', '(' +  data + ')')
+        if (packet['TCP'].dport == 80 or packet['TCP'].sport == 80):
+            data = str(packet['TCP'].payload)
+            if 'Authorization: Basic ' in data:
+                user = data.split('\n')
+                for line in user:
+                    if 'Authorization: Basic ' in line:
+                        data = line.split('Basic ')[1]
+                        if data != '':
+                            data = data.decode("base64")
+                            alert("USER/PASS sent in clear", packet['IP'].src, '(80) ', '(' + data.replace(':', '/') + ')')
+        payload = str(packet['TCP'].payload)
+        if 'Nikto' in payload:
+            alert('Nikto scan detected', packet['IP'].src, '(' +str(packet['TCP'].dport) + ')', '')
+        if ('() { :;};'or '() { :; };' or '() {:; };' or '() {:;};' ) in payload:
+            alert('Shellshock vulnerability scan', packet['IP'].src, '(' + str(packet['TCP'].dport) + ')' , '')
+        
+
 def packetcallback(packet):
     checkForPortScans(packet)
+    checkForPasswords(packet)
 
 parser = argparse.ArgumentParser(description='A network sniffer that identifies basic vulnerabilities')
 parser.add_argument('-i', dest='interface', help='Network interface to sniff on', default='eth0')
